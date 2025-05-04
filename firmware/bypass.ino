@@ -8,7 +8,6 @@
 #define OLED_ADDR       0x3C
 #define I2C_SDA         21
 #define I2C_SCL         22
-#define LED_PIN         2
 
 #define UP9512_ADDR     0x25
 #define REG_SMBUS_LOCK  0x39
@@ -209,16 +208,7 @@ void unlockSMBus() {
 
 // === SETUP & LOOP ===
 void setup() {
-  pinMode(LED_PIN, OUTPUT);
   Serial.begin(115200);
-  
-  // Segnaliamo avvio con LED
-  for (int i = 0; i < 3; i++) {
-    digitalWrite(LED_PIN, HIGH);
-    delay(50);
-    digitalWrite(LED_PIN, LOW);
-    delay(50);
-  }
   
   Serial.println("\n\n=== uP9512 Monitor ===");
   
@@ -265,6 +255,19 @@ void loop() {
                              "Errore nell'impostazione SMBus su LOCKED");
       showSMBusStatus();
     }
+    else if (command == "get") {
+      uint8_t status = getSMBusState();
+      Serial.print("SMBus status: 0x");
+      Serial.println(status, HEX);
+      
+      // Mostra anche descrizione testuale
+      switch (status) {
+        case SystemState::STATE_UNLOCKED: Serial.println("Status: UNLOCKED"); break;
+        case SystemState::STATE_LOCKED:   Serial.println("Status: LOCKED"); break;
+        case SystemState::STATE_ERROR:    Serial.println("Status: ERROR"); break;
+        default:                          Serial.println("Status: UNKNOWN"); break;
+      }
+    }
   }
   
   // Status update
@@ -272,7 +275,4 @@ void loop() {
     lastRefreshTime = millis();
     showSMBusStatus();
   }
-  
-  // Heartbeat LED
-  digitalWrite(LED_PIN, millis() % 2000 < 1000);
 }
