@@ -26,11 +26,15 @@ struct KnownDevice {
 DeviceInfo devices[16];
 uint8_t num_devices = 0;
 uint8_t current_device_idx = 0;
-uint32_t start_runtime;
+uint32_t start_runtime = 0;  // Inizializzato a 0
 bool is_paused = true;
 uint32_t reads_counter = 0;
 uint32_t last_stats_update = 0;
 uint16_t reads_per_second = 0;
+uint32_t total_ops = 0;      // Add this after other global variables
+uint32_t ops_last_second = 0;
+uint32_t total_time_us = 0;
+uint32_t avg_access_time_us = 0;
 
 String get_device_name(uint8_t addr7) {
     static const KnownDevice KNOWN_DEVICES[] = {
@@ -56,25 +60,29 @@ void update_display_stats() {
     display.clearDisplay();
     display.setTextSize(1);
     
-    uint32_t runtime = (millis() - start_runtime) / 1000;
+    uint32_t current_time = millis() - start_runtime;
     
     if(is_paused) {
-        // In pausa mostra solo l'uptime grande centrato
-        display.setTextSize(2);
-        display.setCursor((SCREEN_WIDTH - 64)/2, 12);
-        display.printf("%02d:%02d", runtime/60, runtime%60);
+        // In pausa mostra il tempo dettagliato
+        uint32_t hours = current_time / 3600000;
+        uint32_t minutes = (current_time % 3600000) / 60000;
+        uint32_t seconds = (current_time % 60000) / 1000;
+
+        display.setTextSize(2);  // Dimensione testo più grande
+        display.setCursor((SCREEN_WIDTH - 96)/2, 10);  // Meglio centrato verticalmente
+        display.printf("%02d:%02d:%02d", hours, minutes, seconds);
+        
     } else if(num_devices > 0) {
-        // In monitoring mostra uptime piccolo e stats
+        // In monitoring mostra uptime normale e stats
+        uint32_t runtime = current_time / 1000;
         display.setCursor(0,0);
         display.printf("Up: %02d:%02d", runtime/60, runtime%60);
         
         display.setCursor(0,8);
-        display.printf("Dev: 0x%02X (%s)", 
-                      devices[current_device_idx].addr7,
-                      devices[current_device_idx].name.c_str());
+        display.printf("Dev: (%s)", devices[current_device_idx].name.c_str());
         
         display.setCursor(0,16);
-        display.printf("Time: %.2fms", reads_counter / 1000.0f);
+        display.printf("t/op: %luus", avg_access_time_us);
         
         display.setCursor(0,24);
         display.printf("I/O: %d/s", reads_per_second);
@@ -97,41 +105,61 @@ void scan_i2c_devices() {
 }
 
 void handle_bulk_rw(JsonDocument& cmd, JsonDocument& res) {
+    uint32_t start_time = micros();
+    
     if(is_paused) {
         res["status"] = "PAUSED";
+        res["error"] = "Device monitoring is paused";
         return;
     }
     
     uint8_t addr7 = devices[current_device_idx].addr7;
-    uint32_t start_time = micros();
+    bool success = true;
+    uint32_t op_count = 0;  // Count operations in this call
     
     // Process reads
     if(cmd.containsKey("reads")) {
         JsonArray reads = cmd["reads"];
         size_t count = min(reads.size(), (size_t)BULK_BUFFER_SIZE);
+        op_count += count;  // Add reads to operation count
         uint8_t buffer[BULK_BUFFER_SIZE];
         
-        // Read each register individually for better reliability
-        for(size_t i = 0; i < count; i++) {
-            Wire.beginTransmission(addr7);
-            Wire.write(reads[i].as<uint8_t>());
-            Wire.endTransmission(false);
+        for(size_t i = 0; i < count && success; i++) {
+            uint8_t reg = reads[i].as<uint8_t>();
             
-            if(Wire.requestFrom(addr7, (uint8_t)1) == 1) {
-                buffer[i] = Wire.read();
+            // Complete transaction for each register
+            Wire.beginTransmission(addr7);
+            Wire.write(reg);
+            if(Wire.endTransmission(true) != 0) {
+                success = false;
+                break;
             }
+            
+            // Read single byte
+            if(Wire.requestFrom(addr7, (uint8_t)1) != 1) {
+                success = false;
+                break;
+            }
+            
+            buffer[i] = Wire.read();
         }
         
-        JsonArray values = res.createNestedArray("values");
-        for(size_t i = 0; i < count; i++) {
-            values.add(buffer[i]);
+        if(success) {
+            JsonArray values = res.createNestedArray("values");
+            for(size_t i = 0; i < count; i++) {
+                values.add(buffer[i]);
+            }
+            res["status"] = "OK";
+        } else {
+            res["status"] = "ERROR";
+            res["error"] = "Read failed";
         }
-        reads_counter = micros() - start_time;
     }
     
     // Process writes
     if(cmd.containsKey("writes")) {
         JsonArray writes = cmd["writes"];
+        op_count += writes.size();  // Add writes to operation count
         Wire.beginTransmission(addr7);
         for(JsonVariant v : writes) {
             Wire.write(v["reg"].as<uint8_t>());
@@ -141,20 +169,22 @@ void handle_bulk_rw(JsonDocument& cmd, JsonDocument& res) {
         res["write_status"] = err;
     }
     
-    // Update statistics - modificare questa parte
+    // Update statistics
+    uint32_t elapsed = micros() - start_time;
+    total_time_us += elapsed;
+    total_ops += op_count;
+    
     uint32_t now = millis();
     if(now - last_stats_update >= 1000) {
-        // Count both reads and writes
-        uint32_t total_ops = 0;
-        if(cmd.containsKey("reads")) total_ops += cmd["reads"].size();
-        if(cmd.containsKey("writes")) total_ops += cmd["writes"].size();
-        
-        reads_per_second = total_ops;  // ora conta tutte le operazioni I2C
+        reads_per_second = (total_ops - ops_last_second);
+        ops_last_second = total_ops;
+        avg_access_time_us = (total_ops > 0) ? (total_time_us / total_ops) : 0;
         last_stats_update = now;
     }
     
     res["status"] = "OK";
-    res["timing_us"] = micros() - start_time;
+    res["timing_us"] = elapsed;
+    res["op_count"] = op_count;
 }
 
 void show_scan_results() {
@@ -199,17 +229,31 @@ void process_command(const char* json_str) {
     }
     else if(strcmp(action, "select") == 0) {
         uint8_t target = cmd["addr"];
+        bool found = false;
         for(uint8_t i=0; i<num_devices; i++) {
             if(devices[i].addr7 == target) {
                 current_device_idx = i;
+                found = true;
+                res["selected"] = devices[current_device_idx].addr7;
+                res["name"] = devices[current_device_idx].name;
+                res["status"] = "OK";
                 break;
             }
         }
-        res["selected"] = devices[current_device_idx].addr7;
+        if (!found) {
+            res["status"] = "ERROR";
+            res["error"] = "Device not found";
+        }
     }
     else if(strcmp(action, "bulk_rw") == 0) handle_bulk_rw(cmd, res);
-    else if(strcmp(action, "pause") == 0) is_paused = true;
-    else if(strcmp(action, "resume") == 0) is_paused = false;
+    else if(strcmp(action, "pause") == 0) {
+        is_paused = true;
+        res["status"] = "OK";
+    }
+    else if(strcmp(action, "resume") == 0) {
+        is_paused = false;
+        res["status"] = "OK";
+    }
     else if(strcmp(action, "switch") == 0) {
         current_device_idx = (current_device_idx + 1) % num_devices;
         res["selected"] = devices[current_device_idx].addr7;
@@ -231,8 +275,14 @@ void setup() {
     display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
     display.setTextColor(SSD1306_WHITE);
     
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setCursor(0,0);
+    display.println("Ready...");
+    display.display();
+    
     scan_i2c_devices();
-    start_runtime = millis();
+    is_paused = true;  // Sempre in pausa all'avvio
 }
 
 void loop() {
