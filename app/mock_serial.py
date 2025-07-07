@@ -80,10 +80,7 @@ class MockSerial:
                 elif 'reads' in cmd:
                     values = []
                     for reg in cmd['reads']:
-                        if reg == 0x39:
-                            values.append(0x94)
-                        else:
-                            values.append(0x42)
+                        values.append(0x42)
                     response = {
                         "action": "bulk_rw",
                         "status": "OK",

@@ -2,12 +2,12 @@ import os
 import time
 from serial.tools import list_ports
 from PyQt6.QtWidgets import *
-from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtCore import QTimer
 
 from app.manager import I2CManager
-from app.windows import ReadWidget, WriteWidget
+from app.windows import ReadWidget
 
-developer = False 
+developer = True 
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -110,7 +110,6 @@ class MainWindow(QMainWindow):
                         os.unlink(file_path)
                 except Exception as e:
                     print(f'Error deleting {file_path}: {e}')
-                    
         else:
             os.makedirs(self.log_dir)
         
@@ -137,10 +136,8 @@ class MainWindow(QMainWindow):
         
         # Load both tabs immediately instead of lazy loading
         self.read_widget = ReadWidget(self.manager)
-        self.write_widget = WriteWidget(self.manager)
         
         self.tab_widget.addTab(self.read_widget, "Read")
-        self.tab_widget.addTab(self.write_widget, "Write")
         
         layout.addWidget(self.tab_widget)
         central.setLayout(layout)
@@ -150,28 +147,6 @@ class MainWindow(QMainWindow):
         self.runtime_timer.timeout.connect(self.update_runtime)
         self.runtime_timer.start(100)
         print(f"[{time.time()}] UI setup complete")
-
-    def load_default_values(self):
-        """Carica i valori di default nei controlli"""
-        try:
-            # Aggiorna i controlli nella write widget
-            write_widget = self.write_widget
-            
-            # Imposta fasi
-            for lcs, phases in self.DEFAULT_VALUES['phases'].items():
-                if lcs in write_widget.phase_spinboxes:
-                    write_widget.phase_spinboxes[lcs].setValue(phases)
-            
-            # Imposta protezioni
-            write_widget.total_ocp_combo.setCurrentText(f"{self.DEFAULT_VALUES['protections']['total_ocp']}%")
-            write_widget.vr_shdn_spin.setValue(self.DEFAULT_VALUES['protections']['vr_shutdown'])
-            
-            for key, enabled in self.DEFAULT_VALUES['protections']['enables'].items():
-                if key in write_widget.prot_enables:
-                    write_widget.prot_enables[key].setChecked(enabled)
-                    
-        except Exception as e:
-            print(f"Error loading default values: {e}")
 
     def update_runtime(self):
         """Update runtime in window title"""
@@ -241,20 +216,19 @@ class MainWindow(QMainWindow):
 
 if __name__ == '__main__':
     print(f"[{time.time()}] Application starting")
-    app = QApplication([])
-    print(f"[{time.time()}] Creating main window")
-    window = MainWindow()
-    print(f"[{time.time()}] Showing window")
-    window.show()
-    
-    def clean_exit():
-        #print(f"[{time.time()}] Clean exit initiated")
-        window.close()
-        app.quit()
-    
-    app.aboutToQuit.connect(clean_exit)
-    
     try:
+        app = QApplication([])
+        print(f"[{time.time()}] Creating main window")
+        window = MainWindow()
+        print(f"[{time.time()}] Showing window")
+        window.show()
+
+        def clean_exit():
+            #print(f"[{time.time()}] Clean exit initiated")
+            window.close()
+            app.quit()
+
+        app.aboutToQuit.connect(clean_exit)
         app.exec()
     except KeyboardInterrupt:
         clean_exit()

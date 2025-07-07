@@ -7,8 +7,8 @@ from queue import Queue, Empty
 from datetime import datetime
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from .devices import DEVICE_MAP
-from .mock_serial import MockSerial
+from app.device import DEVICE_MAP
+from app.mock_serial import MockSerial
 
 
 class I2CManager(QObject):
@@ -37,10 +37,9 @@ class I2CManager(QObject):
         self.running = True
         self.is_paused = True
         
-        # Create logs directory if it doesn't exist
+        # Crea la cartella logs solo se richiesto
         self.log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
         os.makedirs(self.log_dir, exist_ok=True)
-        
         # Open log file in logs directory
         log_path = os.path.join(self.log_dir, 'i2c_log.json')
         self.log_file = open(log_path, 'a')
@@ -76,7 +75,7 @@ class I2CManager(QObject):
     def log_communication(self, direction, data):
         """Log communication to JSON file with check"""
         try:
-            if hasattr(self, 'log_file') and not self.log_file.closed:
+            if self.log_file and not self.log_file.closed:
                 entry = {
                     "timestamp": datetime.now().isoformat(),
                     "direction": direction,

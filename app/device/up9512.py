@@ -1,67 +1,9 @@
 import time
-from PyQt6.QtCore import QTimer, QObject, pyqtSignal
 from typing import Dict, List, Optional, Union
 
 from .base import I2CDevice
 
-class SMBusMonitor(QObject):
-    status_changed = pyqtSignal(dict)
-    
-    def __init__(self, device):
-        super().__init__()
-        self.device = device
-        self._last_status = None
-        self.timer = QTimer()
-        self.timer.timeout.connect(self._check_status)
-        self.is_monitoring = False
-        
-    def start(self, interval_ms=250):
-        self.is_monitoring = True
-        self.timer.start(interval_ms)
-        
-    def stop(self):
-        self.is_monitoring = False
-        self.timer.stop()
-        
-    def _check_status(self):
-        try:
-            status = self.device.get_smbus_lock_status()
-            if status and status != self._last_status:
-                self._last_status = status
-                print(f"SMBus status changed: 0x{status['value']:02X} "
-                      f"({'UNLOCKED' if status['unlocked'] else 'LOCKED'})")
-                self.status_changed.emit(status)
-
-        except Exception as e:
-            print(f"SMBus status check error: {e}")
-
-class DeviceConnectionManager:
-    _instances = {}
-    
-    @classmethod
-    def get_device(cls, manager, addr7: int):
-        print(f"[{time.time()}] Requesting UP9512 instance for address 0x{addr7:02X}")
-        key = (addr7, 'UP9512')
-        if key in cls._instances:
-            print(f"[{time.time()}] Reusing existing UP9512 instance for address 0x{addr7:02X}")
-            return cls._instances[key]
-        
-        print(f"[{time.time()}] Creating new UP9512 instance for address 0x{addr7:02X}")
-        cls._instances[key] = UP9512(manager, addr7)
-        return cls._instances[key]
-    
-    @classmethod
-    def remove_device(cls, addr7: int):
-        key = (addr7, 'UP9512')
-        if key in cls._instances:
-            instance = cls._instances[key]
-            if hasattr(instance, 'smbus_monitor'):
-                instance.smbus_monitor.stop()
-            del cls._instances[key]
-            print(f"Removed UP9512 instance for address 0x{addr7:02X}")
-
 class UP9512(I2CDevice):
-    # Add class-level counter
     _instance_count = 0
 
     # Device-specific default values
@@ -110,25 +52,8 @@ class UP9512(I2CDevice):
     TOTAL_OCP_REG = 0x23        # Total OCP threshold
     VR_SHDN_REG = 0x25          # Thermal shutdown threshold
 
-    # SMBus control registers
-    SMBUS_LOCK_REG = 0x39       # SMBus lock status register
-    SMBUS_UNLOCK_VAL = 0x94     # Value to unlock SMBus
-    SMBUS_LOCK_VAL = 0x87       # Value to lock SMBus
-
     # Current Balance Control register
     CB_CTRL_REG = 0x12
-    
-    # Phase current balance registers
-    PHASE_IGAIN_REGS = {
-        1: 0x19,  # PH1_IGAIN
-        2: 0x18,  # PH2_IGAIN
-        3: 0x17,  # PH3_IGAIN
-        4: 0x16,  # PH4_IGAIN
-        5: 0x15,  # PH5_IGAIN
-        6: 0x14,  # PH6_IGAIN
-        7: 0x13,  # PH7_IGAIN
-        8: 0x12,  # PH8_IGAIN (bits 6:2 only)
-    }
 
     # Phase control bit positions
     PHASE_CONFIG = {
@@ -167,16 +92,7 @@ class UP9512(I2CDevice):
         print(f"[{time.time()}] Initializing UP9512 for address 0x{addr7:02X}")
         super().__init__(manager, addr7)
         self.max_phase: int = 8
-        # Create single monitor per device
-        self.smbus_monitor = SMBusMonitor(self)
-        print(f"[{time.time()}] Starting SMBus monitor for address 0x{addr7:02X}")
-        self.smbus_monitor.start()
-        
-    def __del__(self):
-        if hasattr(self, 'smbus_monitor'):
-            self.smbus_monitor.stop()
-        DeviceConnectionManager.remove_device(self.addr7)
-
+    
     def get_current_balance_status(self):
         """Read current balance enable status"""
         value = self.read_registers([self.CB_CTRL_REG])
@@ -184,15 +100,6 @@ class UP9512(I2CDevice):
             return None
         return bool(value[0] & 0x80)  # Check bit 7
         
-    def set_current_balance(self, enabled: bool):
-        """Set current balance enable status"""
-        value = self.read_registers([self.CB_CTRL_REG])[0]
-        if enabled:
-            value |= 0x80  # Set bit 7
-        else:
-            value &= ~0x80  # Clear bit 7
-        return self.write_registers([(self.CB_CTRL_REG, value)])
-
     def read_registers(self, registers):
         """Override to ensure hex values"""
         try:
@@ -200,7 +107,6 @@ class UP9512(I2CDevice):
                 print(f"[{time.time()}] Warning: Empty register list")
                 return None
                 
-            #print(f"[{time.time()}] Reading registers: {[hex(r) if isinstance(r, int) else r for r in registers]}")
             reg_list = [reg if isinstance(reg, int) else int(str(reg), 16) for reg in registers]
             return super().read_registers(reg_list)
         except Exception as e:
@@ -260,8 +166,6 @@ class UP9512(I2CDevice):
     def get_measurements(self) -> Optional[Dict[str, Union[float, int, List[bool]]]]:
         """Read measurements in a single bulk transaction"""
         try:
-            # Read all needed registers in one bulk transaction
-            # Cambiamo l'ordine per assicurarci che PROT_IND2_REG sia letto prima
             registers = [
                 self.PROT_IND2_REG,     # 0x35 - Per-phase OCL status
                 self.PROT_IND_REG,      # 0x3B - Global protection + phase mon
@@ -273,19 +177,13 @@ class UP9512(I2CDevice):
                 self.MISC1_REG          # 0x3C - Protection enables
             ]
             
-            # Add phase gain registers in ordine
-            for i in range(1, 9):  # Da phase 1 a phase 8
-                registers.append(self.PHASE_IGAIN_REGS[i])
-            
             values = self.read_registers(registers)
             if not values or len(values) < 8:
                 return None
                 
-            # Riorganizziamo il parsing secondo il nuovo ordine
             prot_ind2 = values[0]  # OCL status per fase
             prot_ind = values[1]   # Protection status globale
             
-            # Basic measurements partono ora da indice 2
             measurements = {
                 "voltage": values[2] * self.V_LSB,
                 "current": (values[3] * self.I_LSB) / self.R_SHUNT,
@@ -294,16 +192,13 @@ class UP9512(I2CDevice):
                 "power": ((values[6] * self.I_LSB) / self.R_SHUNT) * (values[2] * self.V_LSB)
             }
             
-            # Protection enables
             misc1 = values[7]
             
-            # Get protections con l'ordine corretto dei bit
             active_protections = {}
             if misc1 & (1 << 3):  # Total OCP enabled
                 active_protections['total_ocp'] = bool(prot_ind & (1 << 6))
             if misc1 & (1 << 2):  # Channel OCL enabled
                 active_protections['channel_ocl'] = bool(prot_ind & (1 << 5))
-                # Ora leggiamo correttamente lo stato OCL per ogni fase
                 active_protections['channel_ocl_status'] = [
                     bool(prot_ind2 & (1 << i)) for i in range(8)
                 ]
@@ -313,7 +208,6 @@ class UP9512(I2CDevice):
                 active_protections['uvp'] = bool(prot_ind & (1 << 3))
             active_protections['otp'] = bool(prot_ind & (1 << 7))
             
-            # Operating phases dal campo corretto di PROT_IND
             op_phase_mon = prot_ind & 0x07
             phase_map = {
                 0b000: 1, 0b001: 2, 0b010: 3, 0b011: 4,
@@ -321,42 +215,12 @@ class UP9512(I2CDevice):
             }
             measurements["operating_phases"] = phase_map.get(op_phase_mon, 0)
             
-            # Phase gains partono da indice 8
-            measurements["phase_gains"] = []
-            for i in range(8, 16):
-                igain_bits = (values[i] >> 2) & 0x1F
-                gain_percent = 243.75 - (igain_bits * 6.25)
-                measurements["phase_gains"].append(round(gain_percent, 2))
-
             measurements["protections"] = active_protections
             return measurements
             
         except Exception as e:
             print(f"Error processing measurements: {e}")
             return None
-
-    def get_smbus_lock_status(self) -> Optional[Dict[str, Union[bool, int]]]:
-        """Read SMBus lock status"""
-        # In developer mode, always return unlocked
-        if hasattr(self.manager, 'ser') and hasattr(self.manager.ser, 'port') and self.manager.ser.port == "COM1":
-            return {
-                "locked": False,
-                "unlocked": True,
-                "value": self.SMBUS_UNLOCK_VAL
-            }
-            
-        values = self.read_registers([self.SMBUS_LOCK_REG])
-        if not values:
-            return None
-            
-        value = values[0]
-        status = {
-            "locked": value != self.SMBUS_UNLOCK_VAL,
-            "unlocked": value == self.SMBUS_UNLOCK_VAL,
-            "value": value
-        }
-        #print(f"SMBus status read: 0x{value:02X} -> {status}")
-        return status
 
     def get_phase_config(self):
         """Read current phase configuration"""
@@ -365,18 +229,12 @@ class UP9512(I2CDevice):
             return None
             
         result = {}
-        # Parse LCS0 (bits 6:4 of reg 0x07)
         result['LCS0'] = (values[0] >> 4) & 0x07
-        # Parse LCS1 (bits 2:0 of reg 0x07)
         result['LCS1'] = values[0] & 0x07
-        # Parse LCS2 (bits 6:4 of reg 0x08)
         result['LCS2'] = (values[1] >> 4) & 0x07
-        # Parse LCS3 (bits 2:0 of reg 0x08)
         result['LCS3'] = values[1] & 0x07
-        # Parse LCS4 (bits 6:4 of reg 0x09)
         result['LCS4'] = (values[2] >> 4) & 0x07
         
-        # Convert to actual phase numbers
         for lcs in result:
             for phases, value in self.PHASE_VALUES.items():
                 if value == result[lcs]:
@@ -391,7 +249,6 @@ class UP9512(I2CDevice):
         if not values:
             return None
             
-        # Convert Total OCP value to percentage
         total_ocp = values[0] & 0x07
         ocp_percent = 100
         for percent, value in self.TOTAL_OCP_VALUES.items():
@@ -403,18 +260,3 @@ class UP9512(I2CDevice):
             "total_ocp_percent": ocp_percent,
             "thermal_shutdown_mv": (values[1] * 8)  # 8mV per step
         }
-
-    def get_phase_igains(self):
-        """Read current balance gains for all phases"""
-        values = self.read_registers(list(self.PHASE_IGAIN_REGS.values()))
-        if not values:
-            return None
-            
-        gains = {}
-        for phase, value in zip(self.PHASE_IGAIN_REGS.keys(), values):
-            # Extract bits 6:2 and calculate gain percentage
-            igain_bits = (value >> 2) & 0x1F
-            gain_percent = 243.75 - (igain_bits * 6.25)
-            gains[f"phase{phase}"] = round(gain_percent, 2)
-            
-        return gains

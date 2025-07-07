@@ -1,0 +1,41 @@
+{"timestamp": "2025-07-07T15:20:47.509811", "direction": "TX", "data": {"action": "get_devices"}}
+{"timestamp": "2025-07-07T15:20:47.524859", "direction": "PARSED_RX", "data": {"action": "get_devices", "devices": [37, 60], "names": ["uP9512", "SSD1306"]}}
+{"timestamp": "2025-07-07T15:20:47.572903", "direction": "TX", "data": {"action": "resume"}}
+{"timestamp": "2025-07-07T15:20:47.572903", "direction": "PARSED_RX", "data": {"action": "resume", "status": "OK"}}
+{"timestamp": "2025-07-07T15:20:47.588903", "direction": "TX", "data": {"action": "select", "addr": 37}}
+{"timestamp": "2025-07-07T15:20:47.604904", "direction": "PARSED_RX", "data": {"action": "select", "status": "OK", "name": "uP9512", "addr": 37}}
+{"timestamp": "2025-07-07T15:20:54.594307", "direction": "TX", "data": {"action": "bulk_rw", "reads": [53, 59, 45, 44, 46, 37, 61, 60]}}
+{"timestamp": "2025-07-07T15:20:54.610307", "direction": "PARSED_RX", "data": {"action": "bulk_rw", "status": "OK", "values": [66, 66, 66, 66, 66, 66, 66, 66]}}
+{"timestamp": "2025-07-07T15:20:54.658307", "direction": "TX", "data": {"action": "get_status"}}
+{"timestamp": "2025-07-07T15:20:54.674353", "direction": "PARSED_RX", "data": {"action": "get_status", "status": "OK", "uptime": 4454, "max_phases": 8, "operating_phases": 4}}
+{"timestamp": "2025-07-07T15:20:54.752398", "direction": "TX", "data": {"action": "get_status"}}
+{"timestamp": "2025-07-07T15:20:54.768493", "direction": "PARSED_RX", "data": {"action": "get_status", "status": "OK", "uptime": 4454, "max_phases": 8, "operating_phases": 4}}
+{"timestamp": "2025-07-07T15:20:54.800578", "direction": "TX", "data": {"action": "bulk_rw", "reads": [53, 59, 45, 44, 46, 37, 61, 60]}}
+{"timestamp": "2025-07-07T15:20:54.816579", "direction": "PARSED_RX", "data": {"action": "bulk_rw", "status": "OK", "values": [66, 66, 66, 66, 66, 66, 66, 66]}}
+{"timestamp": "2025-07-07T15:20:54.864578", "direction": "TX", "data": {"action": "get_status"}}
+{"timestamp": "2025-07-07T15:20:54.864578", "direction": "PARSED_RX", "data": {"action": "get_status", "status": "OK", "uptime": 4454, "max_phases": 8, "operating_phases": 4}}
+{"timestamp": "2025-07-07T15:20:54.960657", "direction": "TX", "data": {"action": "get_status"}}
+{"timestamp": "2025-07-07T15:20:54.960657", "direction": "PARSED_RX", "data": {"action": "get_status", "status": "OK", "uptime": 4454, "max_phases": 8, "operating_phases": 4}}
+{"timestamp": "2025-07-07T15:20:55.071353", "direction": "TX", "data": {"action": "get_status"}}
+{"timestamp": "2025-07-07T15:20:55.071626", "direction": "PARSED_RX", "data": {"action": "get_status", "status": "OK", "uptime": 4455, "max_phases": 8, "operating_phases": 4}}
+{"timestamp": "2025-07-07T15:20:55.195749", "direction": "TX", "data": {"action": "get_status"}}
+{"timestamp": "2025-07-07T15:20:55.195749", "direction": "PARSED_RX", "data": {"action": "get_status", "status": "OK", "uptime": 4455, "max_phases": 8, "operating_phases": 4}}
+{"timestamp": "2025-07-07T15:20:55.291749", "direction": "TX", "data": {"action": "bulk_rw", "reads": [53, 59, 45, 44, 46, 37, 61, 60]}}
+{"timestamp": "2025-07-07T15:20:55.291749", "direction": "PARSED_RX", "data": {"action": "bulk_rw", "status": "OK", "values": [66, 66, 66, 66, 66, 66, 66, 66]}}
+{"timestamp": "2025-07-07T15:20:55.322759", "direction": "TX", "data": {"action": "get_status"}}
+{"timestamp": "2025-07-07T15:20:55.322759", "direction": "PARSED_RX", "data": {"action": "get_status", "status": "OK", "uptime": 4455, "max_phases": 8, "operating_phases": 4}}
+{"timestamp": "2025-07-07T15:20:55.400749", "direction": "TX", "data": {"action": "get_status"}}
+{"timestamp": "2025-07-07T15:20:55.416749", "direction": "PARSED_RX", "data": {"action": "get_status", "status": "OK", "uptime": 4455, "max_phases": 8, "operating_phases": 4}}
+{"timestamp": "2025-07-07T15:20:55.512862", "direction": "TX", "data": {"action": "get_status"}}
+{"timestamp": "2025-07-07T15:20:55.512862", "direction": "PARSED_RX", "data": {"action": "get_status", "status": "OK", "uptime": 4455, "max_phases": 8, "operating_phases": 4}}
+{"timestamp": "2025-07-07T15:20:55.624376", "direction": "TX", "data": {"action": "get_status"}}
+{"timestamp": "2025-07-07T15:20:55.624376", "direction": "PARSED_RX", "data": {"action": "get_status", "status": "OK", "uptime": 4455, "max_phases": 8, "operating_phases": 4}}
+{"timestamp": "2025-07-07T15:20:55.720376", "direction": "TX", "data": {"action": "get_status"}}
+{"timestamp": "2025-07-07T15:20:55.736445", "direction": "PARSED_RX", "data": {"action": "get_status", "status": "OK", "uptime": 4455, "max_phases": 8, "operating_phases": 4}}
+{"timestamp": "2025-07-07T15:20:55.783452", "direction": "TX", "data": {"action": "bulk_rw", "reads": [53, 59, 45, 44, 46, 37, 61, 60]}}
+{"timestamp": "2025-07-07T15:20:55.799451", "direction": "PARSED_RX", "data": {"action": "bulk_rw", "status": "OK", "values": [66, 66, 66, 66, 66, 66, 66, 66]}}
+{"timestamp": "2025-07-07T15:20:55.847452", "direction": "TX", "data": {"action": "get_status"}}
+{"timestamp": "2025-07-07T15:20:55.863451", "direction": "PARSED_RX", "data": {"action": "get_status", "status": "OK", "uptime": 4455, "max_phases": 8, "operating_phases": 4}}
+{"timestamp": "2025-07-07T15:20:55.991451", "direction": "TX", "data": {"action": "get_status"}}
+{"timestamp": "2025-07-07T15:20:56.006452", "direction": "PARSED_RX", "data": {"action": "get_status", "status": "OK", "uptime": 4456, "max_phases": 8, "operating_phases": 4}}
+{"timestamp": "2025-07-07T15:20:56.053451", "direction": "PARSED_RX", "data": {"action": "pause", "status": "OK"}}

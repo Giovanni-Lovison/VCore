@@ -1,3 +1,4 @@
+
 class I2CDevice:
     def __init__(self, manager, addr7):
         self.manager = manager
