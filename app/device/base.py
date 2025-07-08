@@ -1,3 +1,4 @@
+# 08.07.25
 
 class I2CDevice:
     def __init__(self, manager, addr7):

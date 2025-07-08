@@ -1,5 +1,8 @@
+# 08.07.25
+
 import json
 import time
+import random
 
 class MockSerial:
     def __init__(self, *args, **kwargs):
@@ -80,7 +83,38 @@ class MockSerial:
                 elif 'reads' in cmd:
                     values = []
                     for reg in cmd['reads']:
-                        values.append(0x42)
+                        if self._selected_device == 0x25:  # uP9512
+                            if reg == 0x35:
+                                values.append(0x00)
+                            elif reg == 0x3B:
+                                values.append(0x04)
+                            elif reg == 0x2D:
+                                base = 120
+                                values.append(max(0, min(0xFF, base + random.randint(-2, 2))))
+                            elif reg == 0x2C:
+                                base = 9
+                                values.append(max(0, min(0xFF, base + random.randint(-2, 2))))
+                            elif reg == 0x2E:
+                                base = 79
+                                values.append(max(0, min(0xFF, base + random.randint(-1, 1))))
+                            elif reg == 0x25:
+                                values.append(0xFE)
+                            elif reg == 0x3D:
+                                base = 9
+                                values.append(max(0, min(0xFF, base + random.randint(-1, 1))))
+                            elif reg == 0x3C:
+                                values.append(0x0F)
+                            elif reg == 0x07 or reg == 0x08 or reg == 0x09:
+                                values.append(0x77)
+                            elif reg == 0x23:
+                                values.append(0x00)
+                            else:
+                                values.append(0x00)
+                        elif self._selected_device == 0x3C:
+                            values.append(0x3C)
+                        else:
+                            values.append(0x42)
+                    
                     response = {
                         "action": "bulk_rw",
                         "status": "OK",

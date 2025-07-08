@@ -1,3 +1,5 @@
+// # 08.07.25
+
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
@@ -44,8 +46,9 @@ struct DeviceSignature {
 
 // Tabella di signature
 const DeviceSignature DEVICE_SIGNATURES[] = {
-    {"NCP4206", {0x99, 0x9A}, {0xFF, 0xFF}, 2},             // MFR_ID, MFR_MODEL 
-    {"uP9512", {0x27, 0x00}, {0xFF, 0xFF}, 2},              // Vendor ID, Device ID
+    {"NCP4206", (const uint8_t[]){0x99}, (const uint8_t[]){0xFF}, 1},             // MFR_ID (to define)
+    {"uP9512", (const uint8_t[]){0x27}, (const uint8_t[]){0x00}, 1},              // Vendor ID
+    {"IR35201", (const uint8_t[]){0xAD}, (const uint8_t[]){0x4D}, 1},             // IC_DEVICE_ID
 };
 const size_t NUM_SIGNATURES = sizeof(DEVICE_SIGNATURES)/sizeof(DeviceSignature);
 
@@ -333,30 +336,17 @@ bool detectDevice() {
     if(currentDevice.isPresent) return true;
     showMessage("SEARCHING...", 1);
     
-    uint8_t attempts = 0;
-    uint8_t found_devices = 0;
-    
-    while(found_devices == 0 && attempts < 5) {
-        delay(100);
-        
-        for(const auto& known : KNOWN_DEVICES) {
-            Wire1.beginTransmission(known.addr);
-            if(Wire1.endTransmission() == 0) {
-                found_devices++;
-                currentDevice.addr = known.addr;
-                currentDevice.isPresent = true;
-                currentDevice.name = known.name;
-                break;
-            }
-        }
-        
-        if(found_devices == 0) {
-            delay(100);
-            attempts++;
-        }
+    scan_i2c_bus();
+
+    if (num_devices > 0) {
+        current_device_idx = 0;
+        currentDevice.addr = devices[0].addr7;
+        currentDevice.isPresent = true;
+        currentDevice.name = devices[0].name.c_str();
+        return true;
     }
     
-    return found_devices > 0;
+    return false;
 }
 
 // === SETUP ===
@@ -436,7 +426,7 @@ void handle_status_command(JsonDocument& cmd, JsonDocument& res) {
 using CommandHandler = void (*)(JsonDocument&, JsonDocument&);
 std::map<String, CommandHandler> command_handlers = {
     {"scan", handle_scan_command},
-    {"get_devices", handle_get_devices_command},
+    {"get_devices", handle_get_devices_command},            // {"action": "get_devices"}
     {"select", handle_select_command},
     {"bulk_rw", handle_bulk_rw_command},
     {"pause", handle_pause_command},

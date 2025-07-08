@@ -1,14 +1,14 @@
-import os
+# 08.07.25
+
 import serial
 import json
 import time 
-import threading
 from queue import Queue, Empty
-from datetime import datetime
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal, QRunnable, QThreadPool, pyqtSlot, QMutex
 
 from app.device import DEVICE_MAP
 from app.mock_serial import MockSerial
+from app.logger import get_logger
 
 
 class I2CManager(QObject):
@@ -16,37 +16,32 @@ class I2CManager(QObject):
     
     def __init__(self, port=None, developer_mode=False):
         super().__init__()
-        """
-        Initialize I2C Manager using 7-bit addressing.
-        The protocol automatically handles the conversion to 8-bit addresses
-        by shifting the address left by 1 and adding the R/W bit.
-        """
         try:
             if developer_mode:
                 self.ser = MockSerial(port)
             else:
-                self.ser = serial.Serial(port, 115200, timeout=0.05, write_timeout=0.1)
+                self.ser = serial.Serial(port, 115200, timeout=1.0, write_timeout=1.0)
+
         except Exception as e:
             print(f"Serial init error: {e}")
             if developer_mode:
                 self.ser = MockSerial(port)
             else:
                 raise
+        
+        # Inizializza il logger
+        self.logger = get_logger()
+        self.logger.system_log(f"I2CManager initialized with port: {port}, developer_mode: {developer_mode}")
+        
         self.response_queue = Queue()
-        self.lock = threading.Lock()
-        self.running = True
+        self.lock = QMutex()
+        self.running = [True]
         self.is_paused = True
         
-        # Crea la cartella logs solo se richiesto
-        self.log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
-        os.makedirs(self.log_dir, exist_ok=True)
-        # Open log file in logs directory
-        log_path = os.path.join(self.log_dir, 'i2c_log.json')
-        self.log_file = open(log_path, 'a')
-
-        # Start listener thread
-        self.listener_thread = threading.Thread(target=self._listener, daemon=True)
-        self.listener_thread.start()
+        # Initialize and start the thread pool
+        self.threadpool = QThreadPool.globalInstance()
+        self.serial_worker = SerialWorker(self.ser, self.response_queue, self.running, self.logger)
+        self.threadpool.start(self.serial_worker)
         
         # Initialize devices
         self.devices = []
@@ -57,37 +52,24 @@ class I2CManager(QObject):
     def _initialize(self):
         """Initialize device list with retries"""
         max_retries = 2
+
         for attempt in range(max_retries):
             time.sleep(0.5)
             self.devices = self.get_devices()
             if self.devices:
-                print(f"Found devices: {self.devices}")
+                self.logger.system_log("Found devices during initialization", {"devices": self.devices})
 
                 # Auto-select first device
                 if self.devices:
                     first_dev = self.devices[0]
-                    print(f"Auto-selecting first device: {first_dev}")
+                    self.logger.system_log("Auto-selecting first device", {"device": first_dev})
                     self.select_device(first_dev['addr7'])
                 return
             
         self.devices = []
     
-    def log_communication(self, direction, data):
-        """Log communication to JSON file with check"""
-        try:
-            if self.log_file and not self.log_file.closed:
-                entry = {
-                    "timestamp": datetime.now().isoformat(),
-                    "direction": direction,
-                    "data": data
-                }
-                self.log_file.write(json.dumps(entry) + '\n')
-                self.log_file.flush()
-        except:
-            pass
-    
     def send_command(self, cmd):
-        """Track pause state when sending commands"""
+        """Track pause state when sending commands and log the command"""
         if cmd.get("action") == "pause":
             self.is_paused = True
         elif cmd.get("action") == "resume":
@@ -96,64 +78,72 @@ class I2CManager(QObject):
             self.is_active = True
         elif cmd.get("action") == "pause":
             self.is_active = False
-        with self.lock:
+            
+        # Log the command being sent without timestamp (only to JSON)
+        self.logger.command_log(cmd)
+            
+        self.lock.lock()
+        try:
             cmd_str = json.dumps(cmd) + '\n'
-            self.log_communication("TX", cmd)
             self.ser.write(cmd_str.encode())
+        finally:
+            self.lock.unlock()
     
-    def wait_response(self, action, timeout=0.05):
-        """Wait for specific response with logging"""
+    def wait_response(self, action, timeout=1.0):
+        """Wait for specific response with enhanced logging and diagnostics"""
         start = time.time()
         stored_responses = []
+        iterations = 0
+        
+        if action == "get_devices":
+            self.logger.system_log(f"Waiting for '{action}' response", {"timeout": timeout})
         
         while time.time() - start < timeout:
             try:
-                response = self.response_queue.get(timeout=0.001)
+                response = self.response_queue.get(timeout=0.01)
                 
                 if response.get("action") == action:
+                    # Success! Got the response we're looking for
+                    if action == "get_devices":
+                        elapsed = time.time() - start
+                        self.logger.system_log(f"Found '{action}' response", {"elapsed": elapsed})
+                    
+                    # Put back any other responses we collected
                     while stored_responses:
                         self.response_queue.put(stored_responses.pop(0))
+                    
                     return response
                 else:
+                    self.logger.system_log("Received unexpected response", {
+                        "expected_action": action,
+                        "received_action": response.get("action")
+                    })
                     stored_responses.append(response)
             except Empty:
-                continue
-                
-        print(f"Timeout waiting for '{action}' response")
+                iterations += 1
+                time.sleep(0.01)
+        
+        elapsed = time.time() - start
+        self.logger.error_log(f"TIMEOUT waiting for '{action}' response", {
+            "elapsed": elapsed,
+            "iterations": iterations
+        })
+        
+        # Log what responses we did find during the wait
+        if stored_responses:
+            self.logger.system_log(f"Found {len(stored_responses)} unrelated responses while waiting", {
+                "responses_count": len(stored_responses),
+                "responses": stored_responses  # Log the actual responses in JSON
+            })
+        else:
+            self.logger.system_log("No other responses received during wait period")
+        
+        # Put back any responses we collected
         while stored_responses:
             self.response_queue.put(stored_responses.pop(0))
+            
         return None
-    
-    def _listener(self):
-        """Serial listener with detailed logging"""
-        buffer = ""
-        while self.running:
-            if not self.ser.is_open:
-                time.sleep(0.1)
-                continue
-                
-            try:
-                if self.ser.in_waiting:
-                    data = self.ser.read(self.ser.in_waiting)
-                    if data:
-                        decoded = data.decode(errors='ignore')
-                        buffer += decoded
-                        #self.log_communication("RAW_RX", decoded)
-                        
-                        while '\n' in buffer:
-                            line, buffer = buffer.split('\n', 1)
-                            try:
-                                response = json.loads(line.strip())
-                                self.log_communication("PARSED_RX", response)
-                                self.response_queue.put(response)
-                            except json.JSONDecodeError:
-                                pass
-                            
-            except serial.SerialException as e:
-                print(f"Serial error: {e}")
-            except Exception as e:
-                print(f"Listener error: {e}")
-    
+
     def rescan_devices(self):
         self.send_command({"action": "scan"})
         return self.wait_response("scan")
@@ -174,11 +164,11 @@ class I2CManager(QObject):
             device_name = response.get("name")
             if device_name in DEVICE_MAP:
                 self.current_device = DEVICE_MAP[device_name](self, addr7)
-                print(f"Selected {device_name} at address 0x{addr7:02X}")
+                self.logger.system_log("Device selected", {"name": device_name, "address": f"0x{addr7:02X}"})
                 self.device_changed.emit()
                 return True
         
-        print(f"Failed to select device: {response}")
+        self.logger.system_log("Failed to select device", {"response": response})
         self.current_device = None
         return False
 
@@ -190,40 +180,24 @@ class I2CManager(QObject):
         cmd = {"action": "bulk_rw"}
         if reads:
             cmd["reads"] = reads
-            hex_reads = [f"0x{reg:02X}" for reg in reads]
-            #print(f"\n[I2C READ] Registers: {hex_reads}")
             
         if writes:
             cmd["writes"] = writes
-            hex_writes = [f"reg: 0x{w['reg']:02X}, value: 0x{w['value']:02X}" for w in writes]
-            #print(f"\n[I2C WRITE] {hex_writes}")
             
         try:
             self.send_command(cmd)
             response = self.wait_response("bulk_rw", timeout=1.0)
             
-            if response:
-                if "values" in response:
-                    hex_values = [f"0x{val:02X}" for val in response["values"]]
-                    #print(f"[I2C READ] Values: {hex_values}")
-                    
-                if "write_status" in response:
-                    status = "OK" if response["write_status"] == 0 else f"ERROR ({response['write_status']})"
-                    #print(f"[I2C WRITE] Status: {status}")
-                
-            
             if not response:
-                print("No response from device")
                 return None
                 
             if response.get("status") == "PAUSED":
-                print("Device is paused")
                 return None
                 
             return response
                 
         except Exception as e:
-            print(f"Bulk RW error: {e}")
+            self.logger.error_log("Bulk RW error", e)
             return None
 
     def monitor(self):
@@ -238,6 +212,7 @@ class I2CManager(QObject):
 
         except KeyboardInterrupt:
             print("\nStopping monitor...")
+
         finally:
             print("Pausing I2C communication...")
             self.send_command({"action": "pause"})
@@ -256,30 +231,33 @@ class I2CManager(QObject):
     def close(self):
         """Improved close with better resource management"""
         try:
+            self.logger.system_log("Closing I2CManager")
             self._send_pause()
             
-            # 2. Ferma il thread
-            self.running = False
+            # Signal worker to stop
+            self.running[0] = False
             
-            # 3. Aspetta il thread
-            if hasattr(self, 'listener_thread'):
-                self.listener_thread.join(timeout=0.5)
+            # Wait for the threadpool to finish (optional, could cause brief blocking)
+            self.threadpool.waitForDone(500)  # Wait max 500ms
             
-            # 4. Chiudi la seriale 
+            # Clear the response queue
+            while not self.response_queue.empty():
+                try:
+                    self.response_queue.get_nowait()
+                except Empty:
+                    break
+            
+            # Close the serial port
             if hasattr(self, 'ser') and self.ser and self.ser.is_open:
                 self.ser.close()
+                self.logger.system_log("Serial port closed")
             
-            # 5. Chiudi il log per ultimo
-            if hasattr(self, 'log_file') and not self.log_file.closed:
-                self.log_file.close()
-                
+            # Log session summary
+            summary = self.logger.get_session_summary()
+            self.logger.system_log("Session summary", summary)
+            
         except Exception as e:
-            print(f"Error during close: {e}")
-            try:
-                if hasattr(self, 'log_file') and not self.log_file.closed:
-                    self.log_file.close()
-            except:
-                pass
+            self.logger.error_log("Error during close", e)
 
     def get_device_info(self, addr7):
         """Get device name from firmware"""
@@ -290,20 +268,51 @@ class I2CManager(QObject):
         return "Unknown"
     
     def get_devices(self):
-        """Get list of devices from firmware"""
-        self.send_command({"action": "get_devices"})
-        for _ in range(3): 
-            response = self.wait_response("get_devices", timeout=1)
+        """Get list of devices from firmware with improved debugging"""
+        self.logger.system_log("STARTING DEVICE DETECTION")
+        
+        # First, clear any pending data
+        while not self.response_queue.empty():
+            try:
+                discarded = self.response_queue.get_nowait()
+                self.logger.system_log("Discarding pending response", {"action": discarded.get('action', 'unknown')})
+            except Empty:
+                break
+        
+        # Try with multiple retries and increasing timeouts
+        max_retries = 5
+        for attempt in range(1, max_retries + 1):
+            # Calculate a longer timeout for later attempts
+            timeout = 1.0 * attempt  # Progressively increase timeout
+            
+            self.logger.system_log("Device detection attempt", {
+                "attempt": attempt, 
+                "max_retries": max_retries, 
+                "timeout": timeout
+            })
+            self.send_command({"action": "get_devices"})
+            
+            # Wait for response
+            response = self.wait_response("get_devices", timeout=timeout)
+            
             if response and 'devices' in response and 'names' in response:
-                return [
+                devices = [
                     {"addr7": addr, "name": name} 
                     for addr, name in zip(
                         response["devices"],
                         response["names"]
                     )
                 ]
+                self.logger.system_log("Device detection success", {"devices_found": len(devices)})
+                return devices
             
-            time.sleep(0.5)  # Wait before retry
+            # Wait before retry
+            if attempt < max_retries:
+                retry_wait = 0.5 * attempt  # Progressively increase wait time
+                self.logger.system_log("Retrying device detection", {"retry_wait": retry_wait})
+                time.sleep(retry_wait)
+        
+        self.logger.system_log("Device detection failed after all attempts")
         return []
     
     def list_devices(self):
@@ -366,3 +375,51 @@ class I2CManager(QObject):
         """Read single register wrapper"""
         response = self.bulk_rw(reads=[reg])
         return response["values"][0] if response and "values" in response else None
+
+
+class SerialWorker(QRunnable):
+    """Worker class for handling serial port communication in a separate thread using QThreadPool"""
+    
+    def __init__(self, ser, queue, running_flag, logger=None):
+        super().__init__()
+        self.ser = ser
+        self.response_queue = queue
+        self.running_flag = running_flag
+        self.buffer = ""
+        self.logger = logger or get_logger()
+        
+    @pyqtSlot()
+    def run(self):
+        """Main worker method to read from serial port and process data"""
+        self.logger.system_log("SerialWorker started")
+        
+        while self.running_flag[0]:
+            if not self.ser.is_open:
+                time.sleep(0.1)
+                continue
+                
+            try:
+                if self.ser.in_waiting:
+                    data = self.ser.read(self.ser.in_waiting)
+                    if data:
+                        decoded = data.decode(errors='ignore')
+                        self.buffer += decoded
+                        
+                        while '\n' in self.buffer:
+                            line, self.buffer = self.buffer.split('\n', 1)
+                            try:
+                                line = line.strip()
+                                if line:  # Skip empty lines
+                                    response = json.loads(line)
+                                    # Log the received response without timestamp (only to JSON)
+                                    self.logger.response_log(response)
+                                    self.response_queue.put(response)
+                            except json.JSONDecodeError:
+                                error_msg = f"Invalid JSON: {line[:50]}..."
+                                self.logger.error_log(error_msg)
+            except serial.SerialException as e:
+                self.logger.error_log("Serial error", e)
+            except Exception as e:
+                self.logger.error_log("Worker error", e)
+                
+            time.sleep(0.001)

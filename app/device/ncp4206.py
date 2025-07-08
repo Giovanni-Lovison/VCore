@@ -1,10 +1,10 @@
+# 08.07.25
+
 from .base import I2CDevice
 
 class NCP4206(I2CDevice):
     DEVICE_NAME = "NCP4206"
-    DEFAULT_ADDR = 0x20
 
-    # SMBus/PMBus command codes (from datasheet)
     CMD_READ_VOUT = 0x8B
     CMD_READ_IOUT = 0x8C
     CMD_READ_POUT = 0x96
@@ -15,25 +15,42 @@ class NCP4206(I2CDevice):
     CMD_VOUT_COMMAND = 0x21
     CMD_PHASE_STATUS = 0xFC
 
+    CMD_READ_TEMP = 0x2E
+    CMD_READ_VOUT_ADC = 0x2D
+    CMD_READ_IOUT_ADC = 0x2C
+    CMD_READ_IOUT_AVG = 0x3D
+    CMD_PROTECTION_INDICATOR = 0x3B
+    CMD_PROTECTION_INDICATOR2 = 0x35
+
     def get_measurements(self):
         """Return a dict with voltage, current, power, and status. Defaults to 0.0/False if not present."""
         try:
-            vout = self.read_registers([self.CMD_READ_VOUT])
-            iout = self.read_registers([self.CMD_READ_IOUT])
-            pout = self.read_registers([self.CMD_READ_POUT])
-            status = self.read_registers([self.CMD_STATUS_BYTE])
+            # Use ADC readings for more precise values, 10mV/step
+            vout = self.read_registers([self.CMD_READ_VOUT_ADC])
+            iout = self.read_registers([self.CMD_READ_IOUT_ADC])
+            iout_avg = self.read_registers([self.CMD_READ_IOUT_AVG])
+            temp = self.read_registers([self.CMD_READ_TEMP])
+            
+            # Power is not directly available from a single register in the new doc, calculate it
+            voltage = float(vout[0]) * 0.01 if vout else 0.0
+            current = float(iout[0]) * 0.01 if iout else 0.0
+            power = voltage * current
+
             return {
-                "voltage": float(vout[0]) if vout else 0.0,
-                "current": float(iout[0]) if iout else 0.0,
-                "power": float(pout[0]) if pout else 0.0,
-                "status": status[0] if status else False
+                "voltage": voltage,
+                "current": current,
+                "power": power,
+                "avg_current": float(iout_avg[0]) * 0.01 if iout_avg else 0.0,
+                "temperature": float(temp[0]) * 0.008 if temp else 0.0 # 8mV/step
             }
+        
         except Exception:
             return {
                 "voltage": 0.0,
                 "current": 0.0,
                 "power": 0.0,
-                "status": False
+                "avg_current": 0.0,
+                "temperature": 0.0
             }
 
     def get_phase_count(self):
@@ -48,36 +65,32 @@ class NCP4206(I2CDevice):
             return 0
 
     def get_protection_status(self):
-        """Return a dict with main protection flags (OVP, OCP, POWER_GOOD, ecc)."""
+        """Return a dict with main protection flags using specific device registers."""
         try:
-            status_byte = self.read_registers([self.CMD_STATUS_BYTE])
-            status_word = self.read_registers([self.CMD_STATUS_WORD])
-            status_vout = self.read_registers([self.CMD_STATUS_VOUT])
-            status_iout = self.read_registers([self.CMD_STATUS_IOUT])
+            prot_ind = self.read_registers([self.CMD_PROTECTION_INDICATOR])
+            prot_ind2 = self.read_registers([self.CMD_PROTECTION_INDICATOR2])
             phase_count = self.get_phase_count()
             prot = {}
 
-            if status_byte:
-                sb = status_byte[0]
-                prot["busy"] = bool(sb & 0x80)
-                prot["off"] = bool(sb & 0x40)
-                prot["ovp"] = bool(sb & 0x20)
-                prot["ocp"] = bool(sb & 0x10)
-                prot["cml"] = bool(sb & 0x02)
-                
-            if status_word and len(status_word) >= 2:
-                sw = status_word[0] | (status_word[1] << 8)
-                prot["power_good"] = not bool(sw & (1 << 11))  # Bit 11 HIGH = not power good
-            if status_vout:
-                sv = status_vout[0]
-                prot["vout_over_warning"] = bool(sv & 0x40)
-                prot["vout_under_warning"] = bool(sv & 0x20)
+            if prot_ind:
+                pi = prot_ind[0]
+                prot["otp"] = bool(pi & 0x80)
+                prot["total_ocp"] = bool(pi & 0x40)
+                prot["channel_ocl"] = bool(pi & 0x20)
+                prot["ovp"] = bool(pi & 0x10)
+                prot["uvp"] = bool(pi & 0x08)
+                # Bits 2:0 are operating phase number, already covered by get_phase_count
 
-            if status_iout:
-                si = status_iout[0]
-                prot["iout_overcurrent"] = bool(si & 0x80)
-                prot["iout_overcurrent_warning"] = bool(si & 0x20)
-                prot["pout_overpower_warning"] = bool(si & 0x01)
+            if prot_ind2:
+                pi2 = prot_ind2[0]
+                prot["phase8_ocl"] = bool(pi2 & 0x80)
+                prot["phase7_ocl"] = bool(pi2 & 0x40)
+                prot["phase6_ocl"] = bool(pi2 & 0x20)
+                prot["phase5_ocl"] = bool(pi2 & 0x10)
+                prot["phase4_ocl"] = bool(pi2 & 0x08)
+                prot["phase3_ocl"] = bool(pi2 & 0x04)
+                prot["phase2_ocl"] = bool(pi2 & 0x02)
+                prot["phase1_ocl"] = bool(pi2 & 0x01)
 
             prot["active_phases"] = phase_count
             return prot

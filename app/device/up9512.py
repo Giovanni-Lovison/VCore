@@ -1,6 +1,6 @@
-import time
-from typing import Dict, List, Optional, Union
+# 08.07.25
 
+import time
 from .base import I2CDevice
 
 class UP9512(I2CDevice):
@@ -9,11 +9,11 @@ class UP9512(I2CDevice):
     # Device-specific default values
     DEFAULT_VALUES = {
         'phases': {
-            'LCS0': 8,  # 8-phase default
-            'LCS1': 6,  # 6-phase default
-            'LCS2': 4,  # 4-phase default
-            'LCS3': 2,  # 2-phase default
-            'LCS4': 1   # 1-phase default
+            'LCS0': 8,
+            'LCS1': 6,
+            'LCS2': 4,
+            'LCS3': 2,
+            'LCS4': 1
         },
         'protections': {
             'total_ocp': 100,  # 100% default
@@ -34,25 +34,19 @@ class UP9512(I2CDevice):
     R_SHUNT = 0.003             # 3mΩ
     T_SENS = 0.0127             # V/°C
 
-    # Register definitions - Consolidated
-    VOUT_REG = 0x2D             # Voltage output register
-    IOUT_REG = 0x2C             # Current output register
-    TEMP_REG = 0x2E             # Temperature register
-    IOUT_AVG_REG = 0x3D         # Average output current
-    
-    # Phase control registers
-    IICP0_1_REG = 0x07          # LCS0 and LCS1 phase control
-    IICP2_3_REG = 0x08          # LCS2 and LCS3 phase control  
-    IICP4_REG = 0x09            # LCS4 phase control
-    
-    # Protection registers
-    PROT_IND2_REG = 0x35        # Per-phase OCL status
-    PROT_IND_REG = 0x3B         # Global protection status + phase monitoring
-    MISC1_REG = 0x3C            # Protection enables
-    TOTAL_OCP_REG = 0x23        # Total OCP threshold
-    VR_SHDN_REG = 0x25          # Thermal shutdown threshold
-
-    # Current Balance Control register
+    # Register definitions
+    VOUT_REG = 0x2D 
+    IOUT_REG = 0x2C
+    TEMP_REG = 0x2E
+    IOUT_AVG_REG = 0x3D
+    IICP0_1_REG = 0x07
+    IICP2_3_REG = 0x08
+    IICP4_REG = 0x09
+    PROT_IND2_REG = 0x35
+    PROT_IND_REG = 0x3B
+    MISC1_REG = 0x3C
+    TOTAL_OCP_REG = 0x23
+    VR_SHDN_REG = 0x25
     CB_CTRL_REG = 0x12
 
     # Phase control bit positions
@@ -163,7 +157,7 @@ class UP9512(I2CDevice):
             "uvp_enabled": bool(misc1 & (1 << 0))
         }
     
-    def get_measurements(self) -> Optional[Dict[str, Union[float, int, List[bool]]]]:
+    def get_measurements(self):
         """Read measurements in a single bulk transaction"""
         try:
             registers = [
